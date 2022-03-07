@@ -20,7 +20,7 @@ Folder structure
 ```
 
 `original` folder contains the uncorrupted images, and `line_mask` contains corrupted images which have random noise 
-in the form lines associated with them.
+in the form lines with varying thickness.
 
 `train` - 9296 images
 `val` - 3856 images
