@@ -58,7 +58,8 @@ def process_imagenette(base_path="data"):
                 img = plt.imread(file)
                 if len(img.shape) == 2:
                     continue
-                shutil.copyfile(file, join(dst, basename(file)))
+                plt.imsave(join(dst, basename(file).split(".")[0] + ".png"), img)
+                # shutil.copyfile(file, join(dst, basename(file)))
 
 process_imagenette()
 
@@ -67,7 +68,7 @@ def apply_line_masks(_img):
     x, y, _ = img.shape
     # Prepare masking matrix
     # White background
-    mask = np.full(img.shape, 255, np.uint8)
+    mask = np.full(img.shape, 1, np.uint8)
     for _ in range(np.random.randint(1, 10)):
 
         # Get random x locations to start line
@@ -82,8 +83,12 @@ def apply_line_masks(_img):
         # Draw black line on the white mask
         cv2.line(mask, (x1, y1), (x2, y2), (0, 0, 0), thickness)
 
-    img[mask == 0] = 255
-    return img
+    img[mask == 0] = 1
+
+    numeric_mask = np.ones((img.shape[0], img.shape[1]))
+    numeric_mask[mask[:, :, 0] == 0] = 0
+
+    return img, numeric_mask
 
 
 def mask_images(base_path="data", mask_dir="line_mask"):
@@ -98,9 +103,11 @@ def mask_images(base_path="data", mask_dir="line_mask"):
 
     for folder in glob(join(orig_path, "*")):
         makedirs(join(dst_path, basename(folder)), exist_ok=True)
+        makedirs(join(dst_path, basename(folder) + "_mask"), exist_ok=True)
         for file in glob(join(folder, "*")):
             img = plt.imread(file)
-            masked_img = apply_line_masks(img)
-            plt.imsave(join(dst_path, basename(folder), basename(file)), masked_img)
+            masked_img, mask = apply_line_masks(img)
+            np.save(join(dst_path, basename(folder) + "_mask", basename(file).split(".")[0] + ".npy"), mask)
+            plt.imsave(join(dst_path, basename(folder), basename(file).split(".")[0] + ".png"), masked_img)
 
 mask_images()
