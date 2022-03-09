@@ -8,6 +8,7 @@ import requests
 import shutil
 from glob import glob
 from copy import deepcopy
+import random
 
 
 def download_imagenette(base_path="data"):
@@ -83,13 +84,26 @@ def apply_line_masks(_img):
         # Draw black line on the white mask
         cv2.line(mask, (x1, y1), (x2, y2), (0, 0, 0), thickness)
 
-    img[mask == 0] = 1
+    img[mask == 0] = 0
 
     numeric_mask = np.ones((img.shape[0], img.shape[1]))
     numeric_mask[mask[:, :, 0] == 0] = 0
 
     return img, numeric_mask
 
+# prob means that every pixel has a 0.2 probability of being corrupted or unknown
+def apply_random_mask(_img, prob=0.2):
+    img = deepcopy(_img)
+    x, y, _ = img.shape
+    mask = np.ones((x, y))
+
+    for i in range(x):
+        for j in range(y):
+            if random.uniform(0, 1) < prob:
+                mask[i, j] = 0
+
+    img[mask == 0] = 0
+    return img, mask
 
 def mask_images(base_path="data", mask_dir="line_mask"):
     orig_path = join(base_path, "inpaint", "original")
@@ -106,8 +120,14 @@ def mask_images(base_path="data", mask_dir="line_mask"):
         makedirs(join(dst_path, basename(folder) + "_mask"), exist_ok=True)
         for file in glob(join(folder, "*")):
             img = plt.imread(file)
-            masked_img, mask = apply_line_masks(img)
+
+            if mask_dir == "line_mask":
+                masked_img, mask = apply_line_masks(img)
+            elif mask_dir == "random_mask":
+                masked_img, mask = apply_random_mask(img)
             np.save(join(dst_path, basename(folder) + "_mask", basename(file).split(".")[0] + ".npy"), mask)
             plt.imsave(join(dst_path, basename(folder), basename(file).split(".")[0] + ".png"), masked_img)
 
-mask_images()
+mask_types = ["line_mask", "random_mask"]
+for mask_type in mask_types:
+    mask_images(mask_dir=mask_type)
