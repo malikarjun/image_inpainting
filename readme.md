@@ -13,14 +13,17 @@ Folder structure
     -inpaint
         -original
             -train
+            -train_mask
             -val
+            -val_mask
         -line_mask
             -train
             -val
 ```
 
 `original` folder contains the uncorrupted images, and `line_mask` contains corrupted images which have random noise 
-in the form lines with varying thickness.
+in the form lines with varying thickness. `train_mask` contains `.npy` files which are 2D numpy arrays where the value
+at `(i, j)`th location is 1 if that value is known in the image, 0 otherwise.
 
 `train` - 9296 images
 `val` - 3856 images
