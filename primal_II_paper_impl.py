@@ -120,10 +120,12 @@ if __name__ == "__main__":
     # _m = 8
     # _n = 8
 
-    l = 0
-    while l < 7:
+    l = 1
+    while l < 10:
         print("l value {}".format(l))
         # iterate over the matrix in patches and invoke methods if missing data is found
+
+        change_known = deepcopy(known)
 
         for i in range(int(_m/2), int(_rows - _m/2)):
             for j in range( int(_n/2), int(_cols - _n/2)):
@@ -146,6 +148,8 @@ if __name__ == "__main__":
                 if all_corrupted(_known):
                     continue
 
+                change_known[si:ei, sj:ej] = 1
+
                 print("i,j = {}, {}".format(i, j))
                 patch_matrix, patch_known = construct_patch_matrix(patch, _known, img_corr, known, _m, _n, _rows, _cols)
                 recon_patch_matrix = matrix_completion(patch_matrix, patch_known)
@@ -157,6 +161,9 @@ if __name__ == "__main__":
                 # known[si:ei, sj:ej] = 1
 
         img_corr = deepcopy(img_recon)
+        # known = deepcopy(change_known)
+        if l % 5 == 0:
+            known = deepcopy(change_known)
         plt.imsave(join(base_dir, "recon_grayscale_{}.png").format(l), img_recon, cmap="gray")
         l += 1
 
