@@ -5,34 +5,11 @@ import numpy as np
 import cvxpy as cp
 from os.path import join
 
+def corrupted(mask):
+    return np.any(mask == 0)
 
-def apply_line_masks(_img):
-    img = deepcopy(_img)
-    x, y, _ = img.shape
-    # Prepare masking matrix
-    # White background
-    mask = np.full(img.shape, 1, np.uint8)
-    for _ in range(np.random.randint(1, 10)):
-        # Get random x locations to start line
-        x1, x2 = np.random.randint(1, x), np.random.randint(1, x)
-        # Get random y locations to start line
-        y1, y2 = np.random.randint(1, y), np.random.randint(1, y)
-        # Get random thickness of the line drawn
-        thickness = np.random.randint(1, 10)
-        # Draw black line on the white mask
-        cv2.line(mask, (x1, y1), (x2, y2), (0, 0, 0), thickness)
-
-    img[mask == 0] = 1
-
-    numeric_mask = np.ones((img.shape[0], img.shape[1]))
-    numeric_mask[mask[:, :, 0] == 0] = 0
-
-    return img, numeric_mask
-# mask = np.load("data/inpaint/line_mask/train_mask/ILSVRC2012_val_00000537.npy")
-# img_orig = plt.imread("data/imagenette2-160/train/n03394916/n03394916_29106.JPEG")
-# img = plt.imread("data/imagenette2-160/train/n03394916/n03394916_1149.JPEG")
-
-
+def all_corrupted(mask):
+    return np.all(mask == 0)
 
 def dist(patch1, patch2, known_val):
     _patch1 = deepcopy(patch1)
@@ -41,7 +18,6 @@ def dist(patch1, patch2, known_val):
     _patch2[known_val == 0] = 0
 
     return np.linalg.norm(_patch1 - _patch2)
-
 
 def construct_patch_matrix(target_patch, l_known, g_img, g_known, m, n, rows, cols):
     patches = []
@@ -81,92 +57,78 @@ def matrix_completion(mat, known):
     constraints = [cp.multiply(known, U) == cp.multiply(known, mat)]
 
     prob = cp.Problem(cp.Minimize(cp.norm(U, "nuc")), constraints)
-    # prob.solve(verbose=True)
     prob.solve()
     print("optimal objective value: {}".format(prob.value))
     return U.value
 
 
-def corrupted(patch):
-    return np.any(patch == 0)
-
-
-def all_corrupted(patch):
-    return np.all(patch == 0)
-
 def reconstruct_image(patch_matrix, img, sr, sc, m, n):
     for i in range(m):
         for j in range(n):
+            # TODO: do we really need the max thresholding here?
             img[sr + i, sc + j] = max(0.0, patch_matrix[i * n + j, 0])
-            # img[sr + i, sc + j] = patch_matrix[i * n + j, 0]
+
+
+def boundary_completion(img_corr, img_recon, known, change_known, m, n, rows, cols):
+    for i in range(int(m / 2), int(rows - m / 2)):
+        for j in range(int(n / 2), int(cols - n / 2)):
+            si = int(i - m / 2)
+            ei = int(i + m / 2)
+            sj = int(j - n / 2)
+            ej = int(j + n / 2)
+
+            if known[i][j] == 1:
+                continue
+
+            patch = img_corr[si:ei, sj:ej]
+            _known = known[si:ei, sj:ej]
+
+            if all_corrupted(_known):
+                continue
+
+            change_known[si:ei, sj:ej] = 1
+
+            print("i,j = {}, {}".format(i, j))
+            patch_matrix, patch_known = construct_patch_matrix(patch, _known, img_corr, known, m, n, rows, cols)
+            recon_patch_matrix = matrix_completion(patch_matrix, patch_known)
+            reconstruct_image(recon_patch_matrix, img_recon, si, sj, m, n)
+
+
+def iterative_diffusion(img_corr, known):
+    img_recon = deepcopy(img_corr)
+
+    rows, cols = img_corr.shape
+    m = int(np.sqrt(rows))
+    n = int(np.sqrt(cols))
+
+    iter = 1
+    while iter < 10:
+        print("iter value {}".format(iter))
+        # iterate over the matrix in patches and invoke methods if missing data is found
+        change_known = deepcopy(known)
+
+        boundary_completion(img_corr=img_corr, img_recon=img_recon, known=known, change_known=change_known, m=m, n=n,
+                            rows=rows, cols=cols)
+
+        img_corr = deepcopy(img_recon)
+        # known = deepcopy(change_known)
+        if iter % 5 == 0:
+            known = deepcopy(change_known)
+        plt.imsave(join(base_dir, "recon_grayscale_{}.png").format(iter), img_recon, cmap="gray")
+        iter += 1
+
+    return img_recon
+
 
 if __name__ == "__main__":
 
     base_dir = "texture_imgs"
     img = plt.imread(join(base_dir, "grayscale.png"))[:, :, 0]
-    # img_corr, known = apply_line_masks(img)
-
     known = np.load(join(base_dir, "mask.npy"))
     img_corr = deepcopy(img)
     img_corr[known == 0] = 0
 
-    img_recon = deepcopy(img_corr)
-
-    _rows, _cols = img.shape
-
-    _m = int(np.sqrt(_rows))
-    _n = int(np.sqrt(_cols))
-
-    # _m = 8
-    # _n = 8
-
-    l = 1
-    while l < 10:
-        print("l value {}".format(l))
-        # iterate over the matrix in patches and invoke methods if missing data is found
-
-        change_known = deepcopy(known)
-
-        for i in range(int(_m/2), int(_rows - _m/2)):
-            for j in range( int(_n/2), int(_cols - _n/2)):
-                # TODO: instead of continuing use min(i + _m, _rows) to handle boundary conditions
-                si = int(i - _m/2)
-                ei = int(i + _m/2)
-                sj = int(j - _n/2)
-                ej = int(j + _n/2)
-
-                # if i == 27 and j == 27:
-                #     pass
-                #     print("here")
-
-                if known[i][j] == 1:
-                    continue
-
-                patch = img_corr[si:ei, sj:ej]
-                _known = known[si:ei, sj:ej]
-
-                if all_corrupted(_known):
-                    continue
-
-                change_known[si:ei, sj:ej] = 1
-
-                print("i,j = {}, {}".format(i, j))
-                patch_matrix, patch_known = construct_patch_matrix(patch, _known, img_corr, known, _m, _n, _rows, _cols)
-                recon_patch_matrix = matrix_completion(patch_matrix, patch_known)
-
-                # recon_patch_matrix[:, 0] = patch_matrix[:, 1]
-
-                reconstruct_image(recon_patch_matrix, img_recon, si, sj, _m, _n)
-                # img_corr = deepcopy(img_recon)
-                # known[si:ei, sj:ej] = 1
-
-        img_corr = deepcopy(img_recon)
-        # known = deepcopy(change_known)
-        if l % 5 == 0:
-            known = deepcopy(change_known)
-        plt.imsave(join(base_dir, "recon_grayscale_{}.png").format(l), img_recon, cmap="gray")
-        l += 1
-
+    img_recon = iterative_diffusion(img_corr=img_corr, known=known)
     plt.imsave(join(base_dir, "recon_grayscale.png"), img_recon, cmap="gray")
 
 
