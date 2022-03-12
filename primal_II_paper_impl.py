@@ -34,29 +34,40 @@ def apply_line_masks(_img):
 
 
 
-def dist(patch1, patch2):
-    return np.linalg.norm(patch1 - patch2)
+def dist(patch1, patch2, known_val):
+    _patch1 = deepcopy(patch1)
+    _patch2 = deepcopy(patch2)
+    _patch1[known_val == 0] = 0
+    _patch2[known_val == 0] = 0
+
+    return np.linalg.norm(_patch1 - _patch2)
 
 
-def construct_patch_matrix(target_patch, g_img, g_known, m, n, rows, cols):
+def construct_patch_matrix(target_patch, l_known, g_img, g_known, m, n, rows, cols):
     patches = []
     known = []
     patch_idx_dist = []
 
-    for i in range(0, rows, m):
-        for j in range(0, cols, n):
-            if i + m >= rows or j + n >= cols:
-                continue
-            euclid_dist = dist(target_patch, g_img[i:i+m, j:j+n])
+    for i in range(int(m/2), int(rows - m/2)):
+        for j in range(int(n/2), int(cols - n/2)):
+            si = int(i - m / 2)
+            ei = int(i + m / 2)
+            sj = int(j - n / 2)
+            ej = int(j + n / 2)
 
-            patches.append(g_img[i:i+m, j:j+n].flatten())
-            known.append(g_known[i:i+m, j:j+n].flatten())
-            patch_idx_dist.append([euclid_dist, len(patches) - 1])
+            if corrupted(g_known[si:ei, sj:ej]):
+                continue
+
+            euclid_dist = dist(target_patch, g_img[si:ei, sj:ej], g_known[si:ei, sj:ej])
+
+            patches.append(g_img[si:ei, sj:ej].flatten())
+            known.append(g_known[si:ei, sj:ej].flatten())
+            patch_idx_dist.append([euclid_dist, len(patches) - 1, [i, j]])
 
     patch_idx_dist = sorted(patch_idx_dist)
 
-    correl_patches = []
-    correl_known = []
+    correl_patches = [target_patch.flatten()]
+    correl_known = [l_known.flatten()]
     for i in range(10):
         patch_idx = patch_idx_dist[i][1]
         correl_patches.append(patches[patch_idx])
@@ -79,10 +90,15 @@ def matrix_completion(mat, known):
 def corrupted(patch):
     return np.any(patch == 0)
 
+
+def all_corrupted(patch):
+    return np.all(patch == 0)
+
 def reconstruct_image(patch_matrix, img, sr, sc, m, n):
     for i in range(m):
         for j in range(n):
             img[sr + i, sc + j] = max(0.0, patch_matrix[i * n + j, 0])
+            # img[sr + i, sc + j] = patch_matrix[i * n + j, 0]
 
 if __name__ == "__main__":
 
@@ -92,7 +108,7 @@ if __name__ == "__main__":
 
     known = np.load(join(base_dir, "mask.npy"))
     img_corr = deepcopy(img)
-    img_corr[known == 0] = 1
+    img_corr[known == 0] = 0
 
     img_recon = deepcopy(img_corr)
 
@@ -101,34 +117,47 @@ if __name__ == "__main__":
     _m = int(np.sqrt(_rows))
     _n = int(np.sqrt(_cols))
 
+    # _m = 8
+    # _n = 8
+
     l = 0
-    while l < 100:
+    while l < 7:
         print("l value {}".format(l))
         # iterate over the matrix in patches and invoke methods if missing data is found
 
-        for i in range(0, _rows, _m):
-            for j in range(0, _cols, _n):
-        # for i in range(0, 2 * _m, _m):
-        #     for j in range(0, 2 * _n, _n):
-                if i + _m >= _rows or j + _n >= _cols:
+        for i in range(int(_m/2), int(_rows - _m/2)):
+            for j in range( int(_n/2), int(_cols - _n/2)):
+                # TODO: instead of continuing use min(i + _m, _rows) to handle boundary conditions
+                si = int(i - _m/2)
+                ei = int(i + _m/2)
+                sj = int(j - _n/2)
+                ej = int(j + _n/2)
+
+                # if i == 27 and j == 27:
+                #     pass
+                #     print("here")
+
+                if known[i][j] == 1:
                     continue
 
-                patch = img_corr[i:i + _m, j: j + _n]
-                _known = known[i:i + _m, j: j + _n]
-                if not corrupted(_known):
+                patch = img_corr[si:ei, sj:ej]
+                _known = known[si:ei, sj:ej]
+
+                if all_corrupted(_known):
                     continue
 
                 print("i,j = {}, {}".format(i, j))
-                patch_matrix, patch_known = construct_patch_matrix(patch, img_corr, known, _m, _n, _rows, _cols)
+                patch_matrix, patch_known = construct_patch_matrix(patch, _known, img_corr, known, _m, _n, _rows, _cols)
                 recon_patch_matrix = matrix_completion(patch_matrix, patch_known)
-                reconstruct_image(recon_patch_matrix, img_recon, i, j, _m, _n)
 
-        img_corr = img_recon
+                # recon_patch_matrix[:, 0] = patch_matrix[:, 1]
+
+                reconstruct_image(recon_patch_matrix, img_recon, si, sj, _m, _n)
+                # img_corr = deepcopy(img_recon)
+                # known[si:ei, sj:ej] = 1
+
+        img_corr = deepcopy(img_recon)
         plt.imsave(join(base_dir, "recon_grayscale_{}.png").format(l), img_recon, cmap="gray")
-        # U = cp.Variable(shape=(_rows, _cols))
-        # prob = cp.Problem(cp.Minimize(cp.tv(U)), [cp.multiply(known[:, :], U) == cp.multiply(known[:, :], img_recon[:, :])])
-        # prob.solve(verbose=True, solver=cp.SCS)
-        # img_recon = U.value
         l += 1
 
     plt.imsave(join(base_dir, "recon_grayscale.png"), img_recon, cmap="gray")
