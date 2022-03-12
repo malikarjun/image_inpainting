@@ -19,7 +19,12 @@ def dist(patch1, patch2, known_val):
 
     return np.linalg.norm(_patch1 - _patch2)
 
-def construct_patch_matrix(target_patch, l_known, g_img, g_known, m, n, rows, cols):
+def construct_patch_matrix(target_patch, l_known, g_img, g_known):
+
+    rows, cols = g_img.shape
+    m = int(np.sqrt(rows))
+    n = int(np.sqrt(cols))
+
     patches = []
     known = []
     patch_idx_dist = []
@@ -63,21 +68,30 @@ def matrix_completion(mat, known):
 
 
 def reconstruct_image(patch_matrix, img, sr, sc, m, n):
+    img_recon = deepcopy(img)
     for i in range(m):
         for j in range(n):
             # TODO: do we really need the max thresholding here?
-            img[sr + i, sc + j] = max(0.0, patch_matrix[i * n + j, 0])
+            img_recon[sr + i, sc + j] = max(0.0, patch_matrix[i * n + j, 0])
+    return img_recon
 
 
-def boundary_completion(img_corr, img_recon, known, change_known, m, n, rows, cols):
-    for i in range(int(m / 2), int(rows - m / 2)):
-        for j in range(int(n / 2), int(cols - n / 2)):
+def boundary_completion(img_corr, known, stride=1):
+
+    rows, cols = img_corr.shape
+    m = int(np.sqrt(rows))
+    n = int(np.sqrt(cols))
+    change_known = deepcopy(known)
+    img_recon = deepcopy(img_corr)
+
+    for i in range(int(m / 2), int(rows - m / 2), stride):
+        for j in range(int(n / 2), int(cols - n / 2), stride):
             si = int(i - m / 2)
             ei = int(i + m / 2)
             sj = int(j - n / 2)
             ej = int(j + n / 2)
 
-            if known[i][j] == 1:
+            if known[i, j] == 1:
                 continue
 
             patch = img_corr[si:ei, sj:ej]
@@ -89,29 +103,23 @@ def boundary_completion(img_corr, img_recon, known, change_known, m, n, rows, co
             change_known[si:ei, sj:ej] = 1
 
             print("i,j = {}, {}".format(i, j))
-            patch_matrix, patch_known = construct_patch_matrix(patch, _known, img_corr, known, m, n, rows, cols)
+            patch_matrix, patch_known = construct_patch_matrix(patch, _known, img_corr, known)
             recon_patch_matrix = matrix_completion(patch_matrix, patch_known)
-            reconstruct_image(recon_patch_matrix, img_recon, si, sj, m, n)
+            # we pass img_recon to reconstruct_image because we want to carry forward the work done in previous
+            # for loop runs
+            img_recon = reconstruct_image(recon_patch_matrix, img_recon, si, sj, m, n)
 
+    return img_recon, change_known
 
 def iterative_diffusion(img_corr, known):
-    img_recon = deepcopy(img_corr)
-
-    rows, cols = img_corr.shape
-    m = int(np.sqrt(rows))
-    n = int(np.sqrt(cols))
-
     iter = 1
+    img_recon = deepcopy(img_corr)
     while iter < 10:
         print("iter value {}".format(iter))
-        # iterate over the matrix in patches and invoke methods if missing data is found
-        change_known = deepcopy(known)
 
-        boundary_completion(img_corr=img_corr, img_recon=img_recon, known=known, change_known=change_known, m=m, n=n,
-                            rows=rows, cols=cols)
-
+        img_recon, change_known = boundary_completion(img_corr=img_corr, known=known)
         img_corr = deepcopy(img_recon)
-        # known = deepcopy(change_known)
+
         if iter % 5 == 0:
             known = deepcopy(change_known)
         plt.imsave(join(base_dir, "recon_grayscale_{}.png").format(iter), img_recon, cmap="gray")
